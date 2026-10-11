@@ -1,0 +1,25 @@
+{
+  "paper_id": "1611.04684v1",
+  "source": "arXiv",
+  "source_version": "1611.04684v1",
+  "source_url": "https://arxiv.org/html/1611.04684v1",
+  "sha256": "80c9c638927f65efc9dcfe837dc44e91a2f37e5fd92af2d6d028569cc3e96d86",
+  "restored_elements": [
+    "text_abstract",
+    "text_introduction",
+    "text_related_work",
+    "text_problem_formalization",
+    "text_knowledge_gate",
+    "text_matching_with_multiple_channels",
+    "text_prior_knowledge_acquisition",
+    "text_experiments",
+    "text_baseline",
+    "text_answer_selection",
+    "text_specific_setting",
+    "text_results",
+    "text_response_selection",
+    "text_discussions",
+    "text_conclusion",
+    "elem_004"
+  ]
+}
