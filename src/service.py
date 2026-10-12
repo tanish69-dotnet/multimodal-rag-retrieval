@@ -183,6 +183,8 @@ class RetrievalService:
             use_expander=use_expander,
         )
         # Ensure strict schema.md EvidenceItem shape
+        # (source_image/figure_type are backward-compatible metadata: existing
+        # clients ignore unknown fields, new clients can map SPIQA names.)
         evidence = []
         for h in hits:
             ev = {
@@ -200,6 +202,10 @@ class RetrievalService:
                 "table_data": h.get("table_data"),
                 "metadata": h.get("metadata") or {},
             }
+            if h.get("source_image"):
+                ev["source_image"] = h.get("source_image")
+            if h.get("figure_type"):
+                ev["figure_type"] = h.get("figure_type")
             evidence.append(ev)
         return evidence
 
@@ -243,8 +249,9 @@ class RetrievalService:
         # Normalize to strict EvidenceItem shape
         out: dict[str, list[dict]] = {}
         for pid, hits in per_paper.items():
-            out[pid] = [
-                {
+            items = []
+            for h in hits:
+                ev = {
                     "rank": h.get("rank"),
                     "score": h.get("score") or h.get("ce_score"),
                     "paper_id": h.get("paper_id"),
@@ -259,8 +266,12 @@ class RetrievalService:
                     "table_data": h.get("table_data"),
                     "metadata": h.get("metadata") or {},
                 }
-                for h in hits
-            ]
+                if h.get("source_image"):
+                    ev["source_image"] = h.get("source_image")
+                if h.get("figure_type"):
+                    ev["figure_type"] = h.get("figure_type")
+                items.append(ev)
+            out[pid] = items
         return out
 
     def health_check(self) -> dict[str, Any]:

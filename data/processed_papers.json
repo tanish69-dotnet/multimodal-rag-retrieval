@@ -10,8 +10,10 @@
         "page": null,
         "content": "",
         "caption": "Architecture of KEHNN",
-        "mentions": [],
-        "image_path": null,
+        "mentions": [
+          "Figure 1 gives the architecture of our model."
+        ],
+        "image_path": "data/source_artifacts/figures/1611.04684v1/arch.png",
         "source_image": "1611.04684v1-Figure1-1.png",
         "figure_type": "schematic"
       },

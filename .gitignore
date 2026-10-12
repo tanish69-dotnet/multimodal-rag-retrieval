@@ -17,8 +17,10 @@ tmp/
 cache/
 model_cache/
 
-# Generated dataset outputs are ignored by default. These Phase 9H source
+# Generated dataset outputs are ignored by default. These Phase 9H/9J source
 # snapshots are explicit reproducibility inputs and are intentionally tracked.
+# (Binary figure bytes stay out: the PNG/PDF can be regenerated from the
+# recorded e-print tarball SHA; only the manifest + JSON records are tracked.)
 data/*
 !data/processed_papers.json
 !data/evaluation_questions.json

@@ -21,5 +21,25 @@
     "text_discussions",
     "text_conclusion",
     "elem_004"
+  ],
+  "eprint_url": "https://arxiv.org/e-print/1611.04684v1",
+  "eprint_sha256": "3910e930450a662c5a89b45a3da56da246ec0734a2f006e86697e9d6267aeca3",
+  "eprint_size": 226684,
+  "eprint_retrieved": "2026-10-12",
+  "figures": [
+    {
+      "element_id": "elem_000",
+      "arxiv_filename": "arch.pdf",
+      "local_pdf": "data/source_artifacts/figures/1611.04684v1/arch.pdf",
+      "local_pdf_sha256": "d327bc0541d5add73eb93110e49d9130a2d91c29314bd69f83372b530ae3c5ce",
+      "local_png": "data/source_artifacts/figures/1611.04684v1/arch.png",
+      "local_png_sha256": "654de8a7235e979d2f686c49ae83f5b56303b5f436aa142f7c41179789d67477",
+      "local_png_size": 487771,
+      "local_png_dimensions": "4617x1674",
+      "spiqa_filename": "1611.04684v1-Figure1-1.png",
+      "mapping_note": "arch.pdf page 0 (single-page architecture diagram PDF from e-print tarball) rendered at 2x scale; text layer confirms BiGRU/CNN/channel labels matching Figure 1 caption",
+      "caption": "Architecture of KEHNN",
+      "page": null
+    }
   ]
 }
