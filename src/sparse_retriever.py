@@ -56,6 +56,24 @@ class SparseRetriever:
     def count(self) -> int:
         return len(self.corpus)
 
+    def delete_paper(self, paper_id: str) -> int:
+        """Remove every chunk for one paper (paper-scoped replacement).
+
+        Mirrors the dense retriever's paper filter; unrelated papers are
+        untouched. Returns the number of chunks removed.
+        """
+        before = len(self.corpus)
+        self.corpus = [
+            chunk for chunk in self.corpus
+            if chunk.get("paper_id") != paper_id
+        ]
+        removed = before - len(self.corpus)
+        if self.corpus:
+            self.bm25 = BM25Okapi([tokenize(ch["content"]) for ch in self.corpus])
+        else:
+            self.bm25 = None
+        return removed
+
     def index_papers(
         self,
         papers_data: Sequence[dict],

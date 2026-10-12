@@ -70,6 +70,18 @@ class HybridPipeline:
         ns = self.sparse.index_papers(papers_data, reset=reset)
         return nd, ns
 
+    def delete_paper(self, paper_id: str) -> tuple[int, int]:
+        """Remove one paper's chunks from both indexes (recoverable replace).
+
+        Never touches other papers and never clears the global index. Returns
+        ``(dense_removed, sparse_removed)``. The element lookup is dropped for
+        the paper so cross-ref expansion cannot serve stale elements.
+        """
+        dense_removed = self.dense.delete_paper(paper_id)
+        sparse_removed = self.sparse.delete_paper(paper_id)
+        self._paper_elements.pop(paper_id, None)
+        return dense_removed, sparse_removed
+
     def _base_search(self, query: str, paper_ids: Optional[Sequence[str]] = None) -> tuple[list[dict], list[dict]]:
         """Run dense + BM25, return raw hits."""
         dens = self.dense.retrieve(query, paper_ids=paper_ids, k=DENSE_TOP)

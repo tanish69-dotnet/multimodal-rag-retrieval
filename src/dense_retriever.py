@@ -109,6 +109,26 @@ class DenseRetriever:
             pass  # collection does not exist yet
         self.collection = self._create_collection()
 
+    def delete_paper(self, paper_id: str) -> int:
+        """Remove every chunk for one paper (paper-scoped replacement).
+
+        Uses a metadata ``where`` filter so unrelated papers are untouched.
+        Returns the number of ids removed (0 when the paper is absent).
+        """
+        try:
+            existing = self.collection.get(
+                where={"paper_id": paper_id}, include=[]
+            )
+        except Exception:
+            return 0
+        ids = list(existing.get("ids") or [])
+        if ids:
+            try:
+                self.collection.delete(ids=ids)
+            except Exception:
+                return 0
+        return len(ids)
+
     def count(self) -> int:
         return self.collection.count()
 

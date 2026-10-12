@@ -146,9 +146,18 @@ class RetrievalService:
             if not self._initialized:
                 self._load_initial_corpus()
 
+            paper_id = paper_dict["paper_id"]
+            # Paper-scoped replace: drop this paper's old chunks first so
+            # re-ingestion is idempotent and never duplicates or leaves stale
+            # chunks. Other papers are untouched; the global index is kept.
+            try:
+                removed = self.pipeline.delete_paper(paper_id)
+                logger.info(f"Re-ingest cleanup for {paper_id}: removed={removed}")
+            except Exception as exc:
+                logger.warning(f"delete_paper failed for {paper_id} ({exc}); continuing with additive index")
             nd, ns = self.pipeline.index_papers([paper_dict], reset=False)
-            self._ingested_paper_ids.add(paper_dict["paper_id"])
-            logger.info(f"Ingested paper {paper_dict['paper_id']}: dense={nd}, sparse={ns}")
+            self._ingested_paper_ids.add(paper_id)
+            logger.info(f"Ingested paper {paper_id}: dense={nd}, sparse={ns}")
             return nd + ns  # total chunks (approximately)
 
     def query_evidence(

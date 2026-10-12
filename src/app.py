@@ -14,10 +14,9 @@ from __future__ import annotations
 import os
 from typing import Any, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-
 from src.service import RetrievalService
 
 # Initialize app
@@ -205,6 +204,71 @@ async def health():
     svc = get_service()
     hc = svc.health_check()
     return HealthResponse(**hc)
+
+
+class IngestPdfResponse(BaseModel):
+    """POST /ingest-pdf response (Phase 9L)."""
+
+    paper_id: str
+    title: str = ""
+    elements: int = 0
+    text_elements: int = 0
+    table_elements: int = 0
+    figure_elements: int = 0
+    figures_with_bytes: int = 0
+    chunks_created: int = 0
+    warnings: list[str] = Field(default_factory=list)
+
+
+@app.post("/ingest-pdf", response_model=IngestPdfResponse)
+async def ingest_pdf(
+    file: UploadFile = File(...),
+    paper_id: str | None = Form(default=None),
+    title: str | None = Form(default=None),
+):
+    """Ingest a PDF file directly (Phase 9L, Person 1 scope).
+
+    Validates ``%PDF-`` magic + size, parses text/tables/figures with PyMuPDF
+    (no GPU, no OCR), then indexes through the existing ``ingest_paper``
+    path (paper-scoped replace, other papers untouched).
+    """
+    from src.ingest.pdf_ingest import MAX_PDF_BYTES, PdfIngestError, parse_pdf_bytes
+
+    raw = await file.read()
+    if len(raw) > MAX_PDF_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"PDF exceeds {MAX_PDF_BYTES} bytes",
+        )
+    if not raw[:5] == b"%PDF-":
+        raise HTTPException(status_code=400, detail="not a PDF file (missing %PDF- magic)")
+
+    svc = get_service()
+    try:
+        paper, warnings = parse_pdf_bytes(raw, paper_id=paper_id, title=title)
+    except PdfIngestError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    try:
+        chunks = svc.ingest_paper(paper)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Indexing failed: {exc}")
+
+    elements = paper.get("elements", [])
+    figures_with_bytes = sum(
+        1 for e in elements if e.get("type") == "figure" and e.get("image_path")
+    )
+    return IngestPdfResponse(
+        paper_id=paper["paper_id"],
+        title=paper.get("title", ""),
+        elements=len(elements),
+        text_elements=sum(1 for e in elements if e.get("type") == "text"),
+        table_elements=sum(1 for e in elements if e.get("type") == "table"),
+        figure_elements=sum(1 for e in elements if e.get("type") == "figure"),
+        figures_with_bytes=figures_with_bytes,
+        chunks_created=chunks,
+        warnings=warnings,
+    )
 
 
 if __name__ == "__main__":
