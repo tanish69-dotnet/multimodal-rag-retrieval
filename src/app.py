@@ -99,6 +99,10 @@ class EvidenceItem(BaseModel):
     caption: Optional[str] = None
     context: str = ""
     image_path: Optional[str] = None
+    # Phase 9N: figure bytes via trusted roots (additive; existing clients
+    # ignore unknown fields). Present only for figure hits with readable bytes.
+    image_b64: Optional[str] = None
+    image_mime: Optional[str] = None
     table_data: Optional[dict[str, Any]] = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 

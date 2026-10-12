@@ -215,6 +215,20 @@ class RetrievalService:
                 ev["source_image"] = h.get("source_image")
             if h.get("figure_type"):
                 ev["figure_type"] = h.get("figure_type")
+            # Phase 9N: figure bytes via trusted roots only (b64). Text/table
+            # hits never carry image payloads; failures degrade to None.
+            # When bytes are unavailable the stale absolute image_path is
+            # dropped as well — it can never resolve inside the NLP
+            # EVIDENCE_ROOT and would only fail closed downstream.
+            if (h.get("type") or "").lower() == "figure":
+                from src.image_transport import image_to_b64  # noqa: WPS433
+
+                b64, mime = image_to_b64(h.get("image_path"))
+                if b64:
+                    ev["image_b64"] = b64
+                    ev["image_mime"] = mime
+                else:
+                    ev["image_path"] = None
             evidence.append(ev)
         return evidence
 
@@ -279,6 +293,15 @@ class RetrievalService:
                     ev["source_image"] = h.get("source_image")
                 if h.get("figure_type"):
                     ev["figure_type"] = h.get("figure_type")
+                if (h.get("type") or "").lower() == "figure":
+                    from src.image_transport import image_to_b64  # noqa: WPS433
+
+                    b64, mime = image_to_b64(h.get("image_path"))
+                    if b64:
+                        ev["image_b64"] = b64
+                        ev["image_mime"] = mime
+                    else:
+                        ev["image_path"] = None
                 items.append(ev)
             out[pid] = items
         return out
