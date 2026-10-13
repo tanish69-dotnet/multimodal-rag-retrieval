@@ -1,3 +1,13 @@
+---
+title: ResearchLens Retrieval
+emoji: 📚
+colorFrom: blue
+colorTo: green
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # Multimodal RAG Retrieval Pipeline (Person 2)
 
 > **Academic Research Assistant** — Dense + Sparse Hybrid Retrieval with Cross-Encoder Reranking for Scientific Paper QA

@@ -1,0 +1,26 @@
+# Render blueprint for the retrieval service — NOT RECOMMENDED on free.
+#
+# This file exists so `render blueprint` does not silently deploy a broken
+# free service. The retrieval stack needs ~2 GB RAM; Render free gives
+# 512 MB and an ephemeral filesystem with no disk, so uploads/indexes are
+# lost on every restart. Deploy this service on Hugging Face Spaces
+# (Docker, CPU Basic 16 GB free) instead. See DEPLOY.md.
+# To use this file anyway you MUST change plan to a paid tier with >=2 GB
+# RAM and attach a persistent disk for data/ and chroma_db/.
+services:
+  - type: web
+    name: researchlens-retrieval-NOT-FOR-FREE
+    runtime: docker
+    repo: <SET-ME: retrieval GitHub repo URL>
+    branch: main
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: standard # minimum viable: 2 GB RAM; free WILL OOM
+    healthCheckPath: /health
+    disk:
+      name: retrieval-data
+      mountPath: /srv/retrieval/data
+      sizeGB: 10
+    envVars:
+      - key: PORT
+        value: "8000"

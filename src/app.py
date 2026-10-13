@@ -12,12 +12,15 @@ Uses CORS middleware for cross-origin access (e.g., Streamlit/React frontends).
 from __future__ import annotations
 
 import os
-from typing import Any, Optional
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from src.service import RetrievalService
+
+if TYPE_CHECKING:
+    from src.service import RetrievalService
 
 # Initialize app
 app = FastAPI(
@@ -42,6 +45,11 @@ _svc: RetrievalService | None = None
 def get_service() -> RetrievalService:
     global _svc
     if _svc is None:
+        # Keep lightweight PDF validation/schema imports usable when optional
+        # retrieval dependencies are not installed.  The real service is still
+        # constructed on first retrieval/index request.
+        from src.service import RetrievalService
+
         _svc = RetrievalService(auto_load_corpus=True)
     return _svc
 
@@ -72,6 +80,9 @@ class Person1Paper(BaseModel):
     paper_id: str
     title: str = ""
     elements: list[Person1Element]
+    authors: list[str] = Field(default_factory=list)
+    abstract: str = ""
+    source_url: str = ""
 
 
 class IngestRequest(BaseModel):
@@ -215,6 +226,9 @@ class IngestPdfResponse(BaseModel):
 
     paper_id: str
     title: str = ""
+    authors: list[str] = Field(default_factory=list)
+    abstract: str = ""
+    source_url: str = ""
     elements: int = 0
     text_elements: int = 0
     table_elements: int = 0
@@ -235,15 +249,31 @@ async def ingest_pdf(
     Validates ``%PDF-`` magic + size, parses text/tables/figures with PyMuPDF
     (no GPU, no OCR), then indexes through the existing ``ingest_paper``
     path (paper-scoped replace, other papers untouched).
+
+    Demo guard: ``DISABLE_UPLOADS=true`` returns 503 (abuse kill-switch).
     """
+    import os as _os
+
+    if _os.environ.get("DISABLE_UPLOADS", "").strip().lower() in {"1", "true", "yes"}:
+        raise HTTPException(status_code=503, detail="uploads disabled by operator (demo guard)")
     from src.ingest.pdf_ingest import MAX_PDF_BYTES, PdfIngestError, parse_pdf_bytes
 
-    raw = await file.read()
-    if len(raw) > MAX_PDF_BYTES:
+    chunks: list[bytes] = []
+    total = 0
+    while total <= MAX_PDF_BYTES:
+        chunk = await file.read(min(1024 * 1024, MAX_PDF_BYTES - total + 1))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        total += len(chunk)
+        if total > MAX_PDF_BYTES:
+            break
+    if total > MAX_PDF_BYTES:
         raise HTTPException(
             status_code=413,
             detail=f"PDF exceeds {MAX_PDF_BYTES} bytes",
         )
+    raw = b"".join(chunks)
     if not raw[:5] == b"%PDF-":
         raise HTTPException(status_code=400, detail="not a PDF file (missing %PDF- magic)")
 
@@ -260,7 +290,11 @@ async def ingest_pdf(
 
     elements = paper.get("elements", [])
     figures_with_bytes = sum(
-        1 for e in elements if e.get("type") == "figure" and e.get("image_path")
+        1
+        for e in elements
+        if e.get("type") == "figure"
+        and e.get("image_path")
+        and Path(str(e["image_path"])).is_file()
     )
     return IngestPdfResponse(
         paper_id=paper["paper_id"],
@@ -275,7 +309,89 @@ async def ingest_pdf(
     )
 
 
+class PaperSearchHit(BaseModel):
+    arxiv_id: str
+    title: str = ""
+    authors: list[str] = Field(default_factory=list)
+    summary: str = ""
+    published: str = ""
+    pdf_url: str = ""
+    source_url: str = ""
+
+
+class ImportRequest(BaseModel):
+    arxiv_id: str
+    title: str | None = None
+    authors: list[str] = Field(default_factory=list)
+    abstract: str = ""
+    source_url: str | None = None
+
+
+@app.get("/papers/search", response_model=list[PaperSearchHit])
+async def papers_search(q: str, max_results: int = 5):
+    """Search arXiv metadata (no PDF download)."""
+    from src.paper_import import search_arxiv
+
+    try:
+        hits = search_arxiv(q, max_results=max_results)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"arXiv search failed: {exc}")
+    return [
+        PaperSearchHit(
+            arxiv_id=h.arxiv_id,
+            title=h.title,
+            authors=h.authors,
+            summary=h.summary[:1200],
+            published=h.published,
+            pdf_url=h.pdf_url,
+            source_url=h.source_url,
+        )
+        for h in hits
+    ]
+
+
+@app.post("/papers/import", response_model=IngestPdfResponse)
+async def papers_import(req: ImportRequest):
+    """Import one arXiv paper: download PDF → parse → index (existing path)."""
+    import os as _os
+
+    if _os.environ.get("DISABLE_UPLOADS", "").strip().lower() in {"1", "true", "yes"}:
+        raise HTTPException(status_code=503, detail="imports disabled by operator (demo guard)")
+    from src.paper_import import extract_arxiv_id, import_arxiv_paper
+
+    if not extract_arxiv_id(req.arxiv_id or ""):
+        raise HTTPException(status_code=400, detail=f"not a valid arXiv identifier: {req.arxiv_id!r}")
+    svc = get_service()
+    try:
+        status = import_arxiv_paper(
+            req.arxiv_id,
+            svc,
+            title_override=req.title,
+            authors=req.authors,
+            abstract=req.abstract,
+            source_url=req.source_url,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"import failed: {exc}")
+    return IngestPdfResponse(
+        paper_id=status["paper_id"],
+        title=status.get("title", ""),
+        authors=status.get("authors", []),
+        abstract=status.get("abstract", ""),
+        source_url=status.get("source_url", ""),
+        elements=status["elements"],
+        text_elements=status["text_elements"],
+        table_elements=status["table_elements"],
+        figure_elements=status["figure_elements"],
+        figures_with_bytes=status["figures_with_bytes"],
+        chunks_created=status["chunks_created"],
+        warnings=status.get("warnings", []),
+    )
+
+
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.getenv("PORT", "8000"))
+    port = int(os.environ.get("PORT", "8000"))
     uvicorn.run("src.app:app", host="0.0.0.0", port=port, reload=False)
