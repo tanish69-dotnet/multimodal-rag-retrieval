@@ -18,6 +18,8 @@ INTENT_KEYWORDS: dict[Intent, list[str]] = {
         "table", "benchmark", "accuracy", "bleu", "score", "metric",
         "ablation", "performance", "results", "statistics", "comparison",
         "f1", "precision", "recall", "auc", "perplexity", "rouge",
+        "best", "highest", "lowest", "worst", "difference", "delta",
+        "rank", "row", "column", "reported",
     ],
     "figure": [
         "figure", "fig", "plot", "chart", "diagram", "curve",
@@ -32,6 +34,17 @@ INTENT_KEYWORDS: dict[Intent, list[str]] = {
     ],
 }
 
+_TABLE_INTENT_RE = re.compile(
+    r"\b(?:"
+    r"which\s+(?:method|model|system|approach|variant)\s+(?:perform\w*|achieve\w*|has|have|is)\s+(?:the\s+)?(?:best|highest|lowest|top|worst)"
+    r"|(?:best|highest|lowest|top|worst)\s+(?:method|model|system|approach|variant|value|score|result)"
+    r"|compar(?:e|ison)\b|difference\s+between\b|summari[sz]e\s+(?:the\s+)?(?:table|experimental|reported)?\s*results?"
+    r")\b",
+    re.IGNORECASE,
+)
+_FIGURE_REFERENCE_RE = re.compile(r"\b(?:figure|fig\.?)\s*\d", re.IGNORECASE)
+_TABLE_REFERENCE_RE = re.compile(r"\btable\s*\d", re.IGNORECASE)
+
 
 def classify_intent(query: str) -> Intent:
     """Classify query intent by keyword overlap (simple, deterministic).
@@ -39,6 +52,14 @@ def classify_intent(query: str) -> Intent:
     Returns ``general`` if no strong signal.
     """
     q = query.lower()
+    # Explicit references and focused comparative wording are more reliable
+    # than generic words such as "model" or "performance".
+    if _TABLE_REFERENCE_RE.search(q):
+        return "table"
+    if _FIGURE_REFERENCE_RE.search(q):
+        return "figure"
+    if _TABLE_INTENT_RE.search(q):
+        return "table"
     scores = {}
     for intent, kws in INTENT_KEYWORDS.items():
         hits = sum(1 for kw in kws if re.search(rf"\b{re.escape(kw)}\b", q))
