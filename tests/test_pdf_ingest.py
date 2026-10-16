@@ -129,6 +129,64 @@ def test_figure_bytes_captions_and_page(two_page_pdf: bytes, tmp_path: Path):
     assert Path(fig["image_path"]).read_bytes()[:8].startswith(b"\x89PNG") or True
 
 
+@pytest.fixture()
+def abbrev_caption_pdf() -> bytes:
+    """A figure whose caption uses the standard 'Fig.' abbreviation.
+
+    Regression case for the InteRFeX figure failure: captions written as
+    ``Fig. 1: ...`` must bind to the extracted raster figure with a
+    canonical ``Figure 1`` label — otherwise the figure is dropped from the
+    index and figure questions abstain for lack of visual evidence.
+    """
+    return _build_pdf(
+        [
+            {
+                "text": [
+                    "1 Introduction",
+                    "Fig. 1: Abbreviated caption style.",
+                    "Fig. 1 shows the system layout.",
+                ],
+                "rect_image": True,
+            },
+        ]
+    )
+
+
+def test_fig_abbreviation_caption_binds_to_figure(abbrev_caption_pdf: bytes, tmp_path: Path):
+    from src.ingest.pdf_ingest import parse_pdf_bytes
+
+    paper, _ = parse_pdf_bytes(
+        abbrev_caption_pdf, paper_id="fig_abbrev_001", figures_dir=tmp_path / "figs"
+    )
+    figs = [e for e in paper["elements"] if e["type"] == "figure"]
+    assert figs, "expected a figure element"
+    fig = figs[0]
+    assert fig["page"] == 1
+    # Canonical label regardless of source abbreviation.
+    assert fig["caption"].startswith("Figure 1")
+    assert "Abbreviated caption style." in fig["caption"]
+    assert fig["image_path"] and Path(fig["image_path"]).is_file()
+
+
+def test_fig_abbreviation_figure_survives_chunking(abbrev_caption_pdf: bytes, tmp_path: Path):
+    """End of the drop chain: an abbreviated-caption figure must be chunked.
+
+    Without caption binding, ``process_figure`` returns ``None`` and the
+    target-paper figure silently disappears from dense/sparse indexes.
+    """
+    from src.chunker import chunk_paper
+    from src.ingest.pdf_ingest import parse_pdf_bytes
+
+    paper, _ = parse_pdf_bytes(
+        abbrev_caption_pdf, paper_id="fig_abbrev_002", figures_dir=tmp_path / "figs"
+    )
+    paper["title"] = "Caption Style Paper"
+    chunks = chunk_paper(paper)
+    fig_chunks = [c for c in chunks if c.get("type") == "figure"]
+    assert fig_chunks, "expected the figure to survive chunking into the index"
+    assert any("Figure 1" in (c.get("content") or "") for c in fig_chunks)
+
+
 def test_malformed_pdf_rejected():
     from src.ingest.pdf_ingest import PdfIngestError, parse_pdf_bytes
 

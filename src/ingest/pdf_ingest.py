@@ -33,8 +33,12 @@ from typing import Any
 
 MAX_PDF_BYTES = 32 * 1024 * 1024  # 32 MiB upload cap
 
-_CAPTION_RE = re.compile(r"^\s*(Table|Figure)\s+([0-9][0-9A-Za-z\-]*)[:.\-–—\s]+(.*)$", re.IGNORECASE)
-_MENTION_RE = re.compile(r"\b(?:Table|Figure|Fig\.)\s+[0-9][0-9A-Za-z\-]*\b", re.IGNORECASE)
+# Figure captions overwhelmingly use the "Fig. N" abbreviation (the target
+# IEEE paper uses "Fig." exclusively); "Tab." is accepted symmetric-analogous
+# to the mention regex. Labels stay canonical ("Figure N", "Table N") so
+# downstream matching (caption text, mentions, cross-ref keys) is unchanged.
+_CAPTION_RE = re.compile(r"^\s*(Table|Tab\.?|Figure|Fig\.?)\s+([0-9][0-9A-Za-z\-]*)[:.\-–—\s]+(.*)$", re.IGNORECASE)
+_MENTION_RE = re.compile(r"\b(?:Table|Tab\.?|Figure|Fig\.?)\s+[0-9][0-9A-Za-z\-]*\b", re.IGNORECASE)
 
 
 class PdfIngestError(ValueError):
@@ -110,7 +114,11 @@ def _split_caption(text: str) -> tuple[str, str] | None:
     match = _CAPTION_RE.match(text or "")
     if not match:
         return None
-    kind = match.group(1).capitalize()
+    raw_kind = match.group(1).strip().lower().rstrip(".")
+    # Normalize abbreviations to the canonical label ("Fig. 1" -> "Figure 1",
+    # "Tab. 2" -> "Table 2") so association, mentions, and cross-reference
+    # keys agree regardless of the source style.
+    kind = "Table" if raw_kind.startswith("tab") else "Figure"
     number, rest = match.group(2).strip(), match.group(3).strip()
     label = f"{kind} {number}"
     caption = f"{label}: {rest}" if rest else f"{label}"
@@ -251,10 +259,22 @@ def _extract_figures(
                 continue
             ordinal += 1
             digest = hashlib.sha256(raw).hexdigest()[:12]
-            out_path = figures_dir / f"fig_p{page_idx + 1}_{ordinal:02d}_{digest}.png"
+            extension = str(pix.get("ext") or "png").lower().lstrip(".")
+            if extension not in {"png", "jpg", "jpeg", "webp", "gif"}:
+                extension = "png"
+            out_path = figures_dir / f"fig_p{page_idx + 1}_{ordinal:02d}_{digest}.{extension}"
             try:
                 out_path.parent.mkdir(parents=True, exist_ok=True)
-                out_path.write_bytes(raw)
+                if str(pix.get("ext") or "").lower().lstrip(".") in {"png", "jpg", "jpeg", "webp", "gif"}:
+                    # Preserve the embedded format so the suffix and MIME
+                    # returned to the reasoning service remain truthful.
+                    out_path.write_bytes(raw)
+                else:
+                    # Exotic PDF image encodings are normalized to PNG rather
+                    # than being stored with a misleading extension.
+                    import fitz
+
+                    out_path = _save_pixmap(fitz.Pixmap(doc, xref), out_path.with_suffix(".png"))
             except OSError as exc:
                 raise PdfIngestError(f"cannot write figure artifact: {exc}") from exc
             figures.append(

@@ -136,7 +136,7 @@ class HybridPipeline:
             )
 
         t0 = time.perf_counter()
-        reranked = self._rerank(query, expanded, k)
+        reranked = self._rerank(query, expanded, k, intent=intent)
         t_rerank = time.perf_counter() - t0
         t_total = t_dense + t_fuse + t_rerank
 
@@ -226,7 +226,7 @@ class HybridPipeline:
         items.sort(key=lambda x: x["score"], reverse=True)
         return [x["item"] for x in items[:FUSE_TOP]]
 
-    def _rerank(self, query: str, fused: list[dict], k: int) -> list[dict]:
+    def _rerank(self, query: str, fused: list[dict], k: int, *, intent: Intent = "general") -> list[dict]:
         if not fused:
             return []
         texts = [f["content"] or "" for f in fused]
@@ -234,13 +234,19 @@ class HybridPipeline:
             ce_scores = self.ce.predict([(query, t) for t in texts])
         except Exception:
             ce_scores = [0.0] * len(texts)
+        target_type = "table" if intent == "table" else "figure" if intent == "figure" else "text"
         pairs = []
         for i, h in enumerate(fused):
             cs = float(ce_scores[i]) if i < len(ce_scores) else 0.0
             hh = dict(h)
             hh["ce_score"] = cs
+            # The router used to boost RRF scores before reranking, after
+            # which the cross-encoder discarded the boost entirely. Apply the
+            # same small type-aware multiplier to the final ranking score,
+            # while preserving the raw CE score for observability.
+            hh["intent_score"] = cs * 1.15 if intent != "general" and hh.get("type") == target_type else cs
             pairs.append(hh)
-        pairs.sort(key=lambda x: x["ce_score"], reverse=True)
+        pairs.sort(key=lambda x: x["intent_score"], reverse=True)
         out = pairs[:k]
         for i, h in enumerate(out, 1):
             h["rank"] = i

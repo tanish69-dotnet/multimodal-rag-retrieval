@@ -52,7 +52,17 @@ def _is_allowed_url(url: str) -> bool:
         parts = urllib.parse.urlsplit(url)
     except ValueError:
         return False
-    return parts.scheme in ALLOWED_SCHEMES and (parts.hostname or "").lower() in ALLOWED_HOSTS
+    try:
+        port = parts.port
+    except ValueError:
+        return False
+    return (
+        parts.scheme in ALLOWED_SCHEMES
+        and (parts.hostname or "").lower() in ALLOWED_HOSTS
+        and parts.username is None
+        and parts.password is None
+        and port in (None, 443)
+    )
 
 
 def search_arxiv(query: str, *, max_results: int = 5) -> list[PaperCandidate]:
@@ -120,6 +130,34 @@ def download_pdf_bytes(pdf_url: str) -> bytes:
         while True:
             if hops > 3:
                 raise ValueError("too many redirects")
+            # Stream production responses so a hostile or broken server cannot
+            # force an oversized PDF into memory before the cap is checked.
+            if hasattr(client, "stream"):
+                with client.stream("GET", url) as response:
+                    if response.status_code in (301, 302, 303, 307, 308):
+                        location = response.headers.get("location", "")
+                        nxt = urllib.parse.urljoin(url, location)
+                        if not _is_allowed_url(nxt):
+                            raise ValueError(f"redirect target not allowed: {nxt!r}")
+                        url, hops = nxt, hops + 1
+                        continue
+                    response.raise_for_status()
+                    content_type = (response.headers.get("content-type") or "").lower()
+                    if "pdf" not in content_type and "octet-stream" not in content_type:
+                        raise ValueError(f"unexpected content-type {content_type!r} (expected PDF)")
+                    declared_length = response.headers.get("content-length")
+                    if declared_length and int(declared_length) > MAX_PDF_BYTES:
+                        raise ValueError(f"PDF exceeds {MAX_PDF_BYTES} bytes")
+                    buf = bytearray()
+                    for chunk in response.iter_bytes(1024 * 1024):
+                        buf.extend(chunk)
+                        if len(buf) > MAX_PDF_BYTES:
+                            raise ValueError(f"PDF exceeds {MAX_PDF_BYTES} bytes")
+                    data = bytes(buf)
+                    break
+
+            # Compatibility path for small test doubles that implement only
+            # ``get``; real httpx clients always take the streaming branch.
             response = client.get(url)
             if response.status_code in (301, 302, 303, 307, 308):
                 location = response.headers.get("location", "")
@@ -133,6 +171,8 @@ def download_pdf_bytes(pdf_url: str) -> bytes:
             if "pdf" not in content_type and "octet-stream" not in content_type:
                 raise ValueError(f"unexpected content-type {content_type!r} (expected PDF)")
             data = response.content
+            if len(data) > MAX_PDF_BYTES:
+                raise ValueError(f"PDF exceeds {MAX_PDF_BYTES} bytes")
             break
     if len(data) > MAX_PDF_BYTES:
         raise ValueError(f"PDF exceeds {MAX_PDF_BYTES} bytes")
@@ -146,6 +186,9 @@ def import_arxiv_paper(
     service: Any,
     *,
     title_override: str | None = None,
+    authors: list[str] | None = None,
+    abstract: str = "",
+    source_url: str | None = None,
 ) -> dict[str, Any]:
     """Search → download → parse → index one arXiv paper (existing pipeline).
 
@@ -162,12 +205,19 @@ def import_arxiv_paper(
     from src.ingest.pdf_ingest import parse_pdf_bytes
 
     paper, warnings = parse_pdf_bytes(raw, paper_id=clean, title=title_override)
+    if authors:
+        paper["authors"] = [author.strip() for author in authors if author.strip()]
+    if abstract.strip():
+        paper["abstract"] = abstract.strip()
+    paper["source_url"] = source_url or f"https://arxiv.org/abs/{clean}"
     chunks = service.ingest_paper(paper)
     elements = paper.get("elements", [])
     return {
         "paper_id": paper["paper_id"],
         "title": paper.get("title", ""),
-        "source_url": f"https://arxiv.org/abs/{clean}",
+        "authors": paper.get("authors", []),
+        "abstract": paper.get("abstract", ""),
+        "source_url": paper["source_url"],
         "download_bytes": len(raw),
         "elements": len(elements),
         "text_elements": sum(1 for e in elements if e.get("type") == "text"),
